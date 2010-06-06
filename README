@@ -1,0 +1,4 @@
+1 .- Download python script.
+2 .- Copy it with `cp /usr/local/bin/ twitterfollowtools`
+3 .- Give execution permissions with chmod `chmod a+x /usr/local/bin/twitterfollowtools`
+4 .- Get usage with `followtwittertools -h`!

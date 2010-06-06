@@ -1,0 +1,187 @@
+#!/usr/bin/env python
+import sys,getopt,simplejson
+from base64 import standard_b64encode as b64enc
+from urllib import urlencode
+from urllib2 import urlopen,build_opener,HTTPBasicAuthHandler,URLError,HTTPError
+
+DEBUG = True
+
+def main(argv):
+	usr = None
+	pwd = None
+	dbg = False
+	kwd = None
+	phs = None
+	rpp = None
+	amount = 10
+	try:
+		opts, args = getopt.getopt(argv,"u:k:p:a:r:dh",["user=","keyword=","phrase=","amount=","rpp=","debug","help"])
+	except getopt.GetoptError:
+		usage()
+		sys.exit(2)
+	if len(args) is 0 and len(opts) is 0:
+		shorthelp()
+		sys.exit(2)
+	for opt, arg in opts:
+		if opt in('-h','--help'):
+			usage()
+			sys.exit()
+		elif opt in('-u','--user'):
+			creds = arg.split(':')
+			if len(creds) < 2:
+				print creds," is not a valid username!"
+				sys.exit(2) 
+			usr = creds[0]
+			pwd = creds[1]
+		elif opt in('-k','--keyword'):
+			kwd = arg
+		elif opt in('-p','--phrase'):
+			phs = arg
+		elif opt in('-a','--amount'):
+			amount = int(arg)
+		elif opt in('-r','--rpp'):
+			rpp = arg
+		elif opt in('-d','--debug'):
+			print "debug mode On"
+			dbg = True
+	if usr is None:
+		print "User not provided!"
+		usage()
+		sys.exit(2)
+	if pwd is None:
+		print "Password not provided!"
+		usage()
+		sys.exit(2)
+	if kwd is None and phs is None:
+		print "Keyword and phrase not provided, use one of them"
+		usage()
+		sys.exit(2)	
+	twitter = Twitter(usr,pwd,dbg)
+	if not twitter.isTwitterUp():
+		print "Twitter is down, try later"
+		sys.exit(2)
+	if not twitter.validCredentials():
+		print "User or password not valid"
+		sys.exit(2)
+	if kwd is not None:
+		users = twitter.searchUsersByKeyword(kwd)
+	elif phs is not None:
+		users = twitter.searchUsersByKeyword(phs)
+	for a in range(amount):
+		user = users[a]
+		if not twitter.friendshipExists(user):
+			twitter.createFriendship(user)
+	sys.exit(1)
+
+class Twitter(object):
+	def __init__(self,user,password,debugmode=False):
+		self._user = user;
+		self._debug = debugmode
+		self._password = password;
+		self._handler = HTTPBasicAuthHandler()
+		self._realm = 'Twitter API'
+		self._format = 'json'
+		self._api_url = 'http://api.twitter.com/%s.%s'
+		self._test_url = 'help/test'
+		self._credentials_url = 'account/verify_credentials'
+		self._search_url = 'search'
+		self._verify_friendship_url = 'friendships/exists'
+		self._create_friendship_url = 'friendships/create'
+	def _call(self,url,params=None):
+		if self._debug:
+			print 'twitter request : ',url,'.'
+		self._handler.add_password(self._realm,url,self._user,self._password)
+                self._opener = build_opener(self._handler)
+		#try:
+		result = self._opener.open(url,params)
+		bfr = result.read() 
+		#except URLError:
+		#	print "Possible network issue"
+		#	sys.exit(2)
+		self._opener.close()
+		return simplejson.loads(bfr)
+	def isTwitterUp(self):
+		if self._debug:
+			print 'checking if twitter is up.'
+		url_api_call = self._api_url%(self._test_url,self._format)
+		result = self._call(url_api_call)
+		if result and result == 'ok':
+			return True
+		else:
+			return False
+	def validCredentials(self):
+		if self._debug:
+			print 'checking if provided credentials are valid.'
+		url_api_call = self._api_url%(self._credentials_url,self._format)
+		try:
+			result = self._call(url_api_call)
+		except HTTPError:
+			return False
+		sname = result["screen_name"]
+		if sname.lower() == self._user.lower():
+			return True
+		else:
+			return False
+	def searchUsersByKeyword(self,keyword,rpp=None):
+		if self._debug:
+			print 'Searching users that had mentioned recently ',keyword,' keyword.'
+		params = {'q':keyword}
+		if rpp is not None:
+			params["rpp"] = rpp 
+		url_api_call = self._api_url%(self._search_url,self._format)
+		url_api_call += '?'+urlencode(params)
+		result = self._call(url_api_call)
+		users = []
+		for r in result['results']:
+			users.append(r['from_user'])
+		return users
+	def searchUsersByPhrase(self,phrase):
+		if self._debug:
+                        print 'Searching users that had mentioned recently ',phrase,' phrase.'
+                params = {'q':phrase.replace(' ','+')}
+		if rpp is not None:
+			params["rpp"] = rpp
+                url_api_call = self._api_url%(self._search_url,self._format)
+                url_api_call += '?'+urlencode(params)
+                result = self._call(url_api_call)
+                users = []
+                for r in result['results']:
+                        users.append(r['from_user'])
+                return users
+	def friendshipExists(self,user):
+		if self._debug:
+			print 'checking if friendship between ',self._user,' and ',user, ' exists.'
+		params = {'user_a':self._user,'user_b':user}
+		url_api_call = self._api_url%(self._verify_friendship_url,self._format)
+		url_api_call += '?'+urlencode(params)
+		result = self._call(url_api_call)
+		if result and result == True:
+			return True
+		else:
+			return False
+	def createFriendship(self,user):
+		if self._debug:
+			print 'creating friendship between ',self._user,' and ',user,'.'
+		params = {'screen_name':user}
+		url_api_call = self._api_url%(self._create_friendship_url,self._format)
+		url_api_call  += '?'+urlencode(params)
+		result = self._call(url_api_call,{})
+		sname = result["screen_name"]
+                if sname.lower() == self._user.lower():
+                        return True
+                else:
+                        return False
+
+def shorthelp():
+	print """twitterfollowtools: try -h or --help for more information"""
+def usage():
+	print """Usage: twitterfollowtools [options...]
+Options:
+	-u/--username=<USERNAME> # twitter username and password colon splitted : <user:password> REQUIRED
+	-k/--keyword=<KEYWORD>   # keyword to follow ( if white space is included use quotes, expl: `-h "keyword with whitespaces"` ) REQUIRED IF PHRASE NOT PROVIDED
+	-p/--phrase=<PHRASE>     # phrase to follow REQUIRED IF KEYWORD NOT PROVIDED
+	-a/--amount=<AMOUNT>     # amount of users to follow OPTIONAL default is 10
+	-h/--help                # prints this information"""
+
+if __name__ == "__main__":
+	main(sys.argv[1:]) 
